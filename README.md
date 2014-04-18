@@ -1,10 +1,11 @@
-javahelper
+JAVA_HELPER
 ==========
 
 This would be simple Java code snippets that helped me fix various issues during development.
 
 
 A. InstallCert.java
+=
    Description: 
         Used to add trusted keystore when using self signed certificates over SSL.
         This was particularly helpful when I had a CAS server deployed on a machine
@@ -14,6 +15,7 @@ A. InstallCert.java
    Usage: java InstallCert localhost:8443
 
 B. HTTPCasClient.java 
+=
    Description: 
                Test a CAS RESTful API 
 

@@ -1,0 +1,239 @@
+/**
+ * 
+ */
+package com.xx.yy.service;
+
+import java.security.KeyManagementException;
+import java.security.NoSuchAlgorithmException;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import javax.net.ssl.HostnameVerifier;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
+
+import org.apache.commons.httpclient.HttpClient;
+import org.apache.commons.httpclient.NameValuePair;
+import org.apache.commons.httpclient.methods.DeleteMethod;
+import org.apache.commons.httpclient.methods.GetMethod;
+import org.apache.commons.httpclient.methods.PostMethod;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * @author Rahul Vishwakarma
+ * Ref: https://wiki.jasig.org/display/CASUM/RESTful+API
+ * A direct port of the Groovy code available in the reference above
+ *
+ */
+public class HTTPCasClient {
+	
+	protected static Logger log = LoggerFactory.getLogger(HTTPCasClient.class);
+
+	/**
+	 * For tackling exception:
+	 * java.lang.RuntimeException: javax.net.ssl.SSLHandshakeException: java.security.cert.CertificateException: No subject alternative names present
+	 * Ref: http://stackoverflow.com/questions/19540289/how-to-fix-the-java-security-cert-certificateexception-no-subject-alternative
+	 */
+	private void disableSslVerification() {
+	    try
+	    {
+	        // Create a trust manager that does not validate certificate chains
+	        TrustManager[] trustAllCerts = new TrustManager[] {new X509TrustManager() {
+	            public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+	                return null;
+	            }
+	            public void checkClientTrusted(X509Certificate[] certs, String authType) {
+	            }
+	            public void checkServerTrusted(X509Certificate[] certs, String authType) {
+	            }
+	        }
+	        };
+
+	        // Install the all-trusting trust manager
+	        SSLContext sc = SSLContext.getInstance("SSL");
+	        sc.init(null, trustAllCerts, new java.security.SecureRandom());
+	        HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+
+	        // Create all-trusting host name verifier
+	        HostnameVerifier allHostsValid = new HostnameVerifier() {
+	            public boolean verify(String hostname, SSLSession session) {
+	            	log.warn("TEST CODE: Disabling the Certificate check for:"+hostname);
+	                return true;
+	            }
+	        };
+
+	        // Install the all-trusting host verifier
+	        HttpsURLConnection.setDefaultHostnameVerifier(allHostsValid);
+	    } catch (NoSuchAlgorithmException e) {
+	        e.printStackTrace();
+	        log.warn(e.getMessage());
+	    } catch (KeyManagementException e) {
+	        e.printStackTrace();
+	        log.warn(e.getMessage());
+	    } catch (Exception e) {
+	        e.printStackTrace();
+	        log.warn(e.getMessage());
+	    }
+	    
+	}
+	
+	public String getServiceTicket(String server, String ticketGrantingTicket, String service){
+	    
+		if (ticketGrantingTicket.isEmpty())
+	      return null;
+	    		  
+	    HttpClient client = new HttpClient();
+	    PostMethod post = new PostMethod(server+"/"+ticketGrantingTicket);
+	    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+	    nvps.add(new NameValuePair("service", service));
+	    post.setRequestBody((NameValuePair[]) nvps.toArray(new NameValuePair[1]));
+	    try{
+	      client.executeMethod(post);
+	      String response = post.getResponseBodyAsString();
+	      
+	      switch (post.getStatusCode()){
+	        case 200:
+	          return response;
+	        default:
+	          log.warn("Invalid response code ("+post.getStatusCode()+") from CAS server!");
+	          log.info("Response (1k): " + response.substring(0, Math.min(1024, response.length())));
+	          break;
+	      }
+	    } catch (final Exception e){
+	      log.error(e.getMessage(), e);
+	    } finally{ 
+	      post.releaseConnection();
+	    }
+	    return null;
+	  }
+	
+	
+	public String getTicketGrantingTicket(String server, String username, String password)
+	  {
+	    HttpClient client = new HttpClient();
+	    PostMethod post = new PostMethod(server);
+	    
+	    List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+	    nvps.add(new NameValuePair("username", username));
+	    nvps.add(new NameValuePair("password", password));
+	    post.setRequestBody((NameValuePair[]) nvps.toArray(new NameValuePair[2]));
+	    try{
+	      client.executeMethod(post);
+	      String response = post.getResponseBodyAsString();
+	      switch (post.getStatusCode())
+	      {
+	        case 201:
+	          Matcher matcher = Pattern.compile(".*action=\".*/(.*?)\".*").matcher(response);
+	          if (matcher.matches())
+	            return matcher.group(1);
+	          log.warn("Successful ticket granting request, but no ticket found!");
+	          log.info("Response (1k): " + response.substring(0, Math.min(1024, response.length())));
+	          break;
+	        default:
+	          log.warn("Invalid response code ("+post.getStatusCode()+") from CAS server!");
+	          log.info("Response: $response"+response);
+	          break;
+	      }
+	    }
+	    catch (final Exception e) {
+	    	 log.error(e.getMessage(), e);
+	    } finally {
+	      post.releaseConnection();
+	    }
+	    return null;
+	  }
+	  public void notNull(Object object, String message) {
+	    if (object == null)
+	      throw new IllegalArgumentException(message);
+	  }
+	  
+	  
+	  void getServiceCall(String service, String serviceTicket) {
+	      HttpClient client = new HttpClient();
+	      GetMethod method = new GetMethod(service);
+	      List<NameValuePair> nvps = new ArrayList<NameValuePair>();
+		  nvps.add(new NameValuePair("ticket", serviceTicket));
+	      method.setQueryString((NameValuePair[]) nvps.toArray(new NameValuePair[1]));
+	      try {
+	        client.executeMethod(method);
+	        String response = method.getResponseBodyAsString();
+	        switch (method.getStatusCode())
+	        {
+	          case 200:
+	            log.info("Response: "+response);
+	            break;
+	          default:
+	            log.warn("Invalid response code (" + method.getStatusCode() + ") from CAS server!");
+	            log.info("Response: "+response);
+	            break;
+	        }
+	      } catch (final Exception e) {
+	    	  log.error(e.getMessage(), e);
+	      } finally {
+	          method.releaseConnection();
+	      }
+	  }
+	  void logout(String server, String ticketGrantingTicket) {
+	      HttpClient client = new HttpClient();
+	      DeleteMethod method = new DeleteMethod(server+"/"+ticketGrantingTicket);
+	      try {
+	        client.executeMethod(method);
+	        switch (method.getStatusCode())
+	        {
+	          case 200:
+	            log.info("Logged out");
+	            break;
+	          default:
+	            log.warn("Invalid response code (" + method.getStatusCode() + ") from CAS server!");
+	            log.info("Response ");
+	            break;
+	        }
+	      } catch (final Exception e) {
+	    	  log.error(e.getMessage(), e);
+	      } finally {
+	          method.releaseConnection();
+	      }
+	  }
+	  
+			
+	/**
+	 * @param args
+	 */
+	public static void main(String[] args) {
+			  System.out.println("Starting the HTTP REST Client CAS Test");
+			/**
+			 * #Security authentication CAS URL
+			   cas.service.host
+				 cas.server.host
+			 * 
+			 */
+	        String server = "https://XX.4.YY.63:8443/cas/v1/tickets";
+	        String username = "guestapo";
+	        String password = "guestapo";
+	        String service = "https://XX.4.YY.77:8443/XXYYWeb/secure";
+	        HTTPCasClient client = new HTTPCasClient();
+	        
+	        //System.setProperty("javax.net.ssl.trustStore","root");
+	        //System.setProperty("javax.net.ssl.trustStorePassword","root");
+	   
+	        client.disableSslVerification();
+		      log.warn("Disabled SSL Certificate verification: This may not be working");
+
+	        String ticketGrantingTicket = client.getTicketGrantingTicket(server, username, password);
+	        log.warn("TicketGrantingTicket is: "+ticketGrantingTicket);
+	        String serviceTicket = client.getServiceTicket(server, ticketGrantingTicket, service);
+	        log.warn("ServiceTicket is: "+serviceTicket);
+	        client.getServiceCall(service, serviceTicket);
+	        client.logout(server, ticketGrantingTicket);
+	        
+	        log.warn("Closing the HTTP REST Client CAS Test");
+	  }
+
+}
